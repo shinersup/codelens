@@ -14,11 +14,11 @@ if _backend_root not in sys.path:
 if "/app" not in sys.path and os.path.isdir("/app/app"):
     sys.path.insert(0, "/app")
 
-import pytest
-from unittest.mock import AsyncMock
-from httpx import AsyncClient, ASGITransport
+import pytest # noqa: E402
+from unittest.mock import AsyncMock # noqa: E402
+from httpx import AsyncClient, ASGITransport # noqa: E402
 
-from app.main import app
+from app.main import app # noqa: E402
 
 
 @pytest.fixture

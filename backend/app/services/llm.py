@@ -2,7 +2,6 @@
 LLM Service — the heart of CodeLens.
 """
 
-import json
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from langchain.output_parsers import PydanticOutputParser

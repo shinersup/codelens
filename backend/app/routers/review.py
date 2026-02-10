@@ -7,7 +7,7 @@ POST /api/refactor — AI refactor suggestions (before/after examples)
 GET  /api/history  — user's past reviews
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
