@@ -13,6 +13,7 @@ import {
   ChevronRight,
   ArrowLeft,
   Code2,
+  Trash2,
 } from 'lucide-react';
 
 function getTypeIcon(type) {
@@ -65,17 +66,38 @@ function formatDate(isoString) {
 }
 
 // ── Detail View ──
-function HistoryDetailView({ detail, onBack }) {
+function HistoryDetailView({ detail, onBack, onDelete }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const handleDelete = () => {
+    if (confirmDelete) {
+      onDelete(detail.id);
+    } else {
+      setConfirmDelete(true);
+      setTimeout(() => setConfirmDelete(false), 3000);
+    }
+  };
+
   return (
     <div className="animate-fade-in">
       {/* Back button + header */}
-      <button
-        onClick={onBack}
-        className="btn-ghost mb-4 -ml-2"
-      >
-        <ArrowLeft size={14} />
-        Back to history
-      </button>
+      <div className="flex items-center justify-between mb-4">
+        <button onClick={onBack} className="btn-ghost -ml-2">
+          <ArrowLeft size={14} />
+          Back to history
+        </button>
+        <button
+          onClick={handleDelete}
+          className={`btn-ghost text-xs ${
+            confirmDelete
+              ? 'text-accent-red bg-accent-red/5 border border-accent-red/20'
+              : 'text-txt-muted hover:text-accent-red'
+          }`}
+        >
+          <Trash2 size={13} />
+          {confirmDelete ? 'Click again to confirm' : 'Delete'}
+        </button>
+      </div>
 
       <div className="flex items-center gap-3 mb-5">
         {getTypeIcon(detail.review_type)}
@@ -130,6 +152,7 @@ export default function History() {
   const [error, setError] = useState('');
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   useEffect(() => {
     loadHistory();
@@ -159,6 +182,31 @@ export default function History() {
     }
   };
 
+  const handleDeleteOne = async (id) => {
+    try {
+      await historyApi.delete(id);
+      setItems(items.filter((item) => item.id !== id));
+      setDetail(null);
+    } catch (err) {
+      setError('Failed to delete review.');
+    }
+  };
+
+  const handleClearAll = async () => {
+    if (confirmClear) {
+      try {
+        await historyApi.clearAll();
+        setItems([]);
+        setConfirmClear(false);
+      } catch (err) {
+        setError('Failed to clear history.');
+      }
+    } else {
+      setConfirmClear(true);
+      setTimeout(() => setConfirmClear(false), 3000);
+    }
+  };
+
   const handleBack = () => {
     setDetail(null);
   };
@@ -167,7 +215,11 @@ export default function History() {
     <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
       {/* Show detail view if selected */}
       {detail && !detailLoading && (
-        <HistoryDetailView detail={detail} onBack={handleBack} />
+        <HistoryDetailView
+          detail={detail}
+          onBack={handleBack}
+          onDelete={handleDeleteOne}
+        />
       )}
 
       {detailLoading && (
@@ -179,11 +231,26 @@ export default function History() {
       {/* Show list if no detail selected */}
       {!detail && !detailLoading && (
         <>
-          <div className="mb-6">
-            <h1 className="font-display font-bold text-xl text-txt-primary">Review History</h1>
-            <p className="text-sm text-txt-muted mt-1">
-              Your last 50 code analyses, most recent first. Click to view details.
-            </p>
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h1 className="font-display font-bold text-xl text-txt-primary">Review History</h1>
+              <p className="text-sm text-txt-muted mt-1">
+                Your last 50 code analyses, most recent first.
+              </p>
+            </div>
+            {items.length > 0 && (
+              <button
+                onClick={handleClearAll}
+                className={`btn-ghost text-xs ${
+                  confirmClear
+                    ? 'text-accent-red bg-accent-red/5 border border-accent-red/20'
+                    : 'text-txt-muted hover:text-accent-red'
+                }`}
+              >
+                <Trash2 size={13} />
+                {confirmClear ? 'Click again to confirm' : 'Clear All'}
+              </button>
+            )}
           </div>
 
           {loading && (
@@ -193,7 +260,7 @@ export default function History() {
           )}
 
           {error && (
-            <div className="flex items-center gap-2 bg-accent-red/5 border border-accent-red/20 text-accent-red text-sm px-4 py-3 rounded-lg">
+            <div className="flex items-center gap-2 bg-accent-red/5 border border-accent-red/20 text-accent-red text-sm px-4 py-3 rounded-lg mb-4">
               <AlertCircle size={14} />
               {error}
             </div>

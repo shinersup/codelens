@@ -165,3 +165,38 @@ async def get_history_detail(
         score=review.score,
         created_at=review.created_at.isoformat(),
     )
+
+@router.delete("/history/{review_id}", status_code=204)
+async def delete_history_item(
+    review_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a single review from history."""
+    result = await db.execute(
+        select(Review).where(Review.id == review_id, Review.user_id == user.id)
+    )
+    review = result.scalar_one_or_none()
+
+    if not review:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Review not found",
+        )
+
+    await db.delete(review)
+
+
+@router.delete("/history", status_code=204)
+async def clear_history(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete all reviews for the current user."""
+    result = await db.execute(
+        select(Review).where(Review.user_id == user.id)
+    )
+    reviews = result.scalars().all()
+
+    for review in reviews:
+        await db.delete(review)

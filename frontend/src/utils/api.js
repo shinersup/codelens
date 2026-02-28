@@ -63,6 +63,8 @@ export const codeAnalysis = {
 export const history = {
   getAll: () => api.get('/history'),
   getById: (id) => api.get(`/history/${id}`),
+  delete: (id) => api.delete(`/history/${id}`),
+  clearAll: () => api.delete('/history'),
 };
 
 // ── Health ──
