@@ -236,7 +236,7 @@ class TestCaching:
     @pytest.mark.asyncio
     async def test_cache_hit_skips_llm_call(self):
         """When cache has a result, the LLM should NOT be called."""
-        from app.services.llm import LLMService
+        from app.services.llm import MockLLMService as LLMService
 
         service = LLMService.__new__(LLMService)
         service.review_parser = MagicMock()
