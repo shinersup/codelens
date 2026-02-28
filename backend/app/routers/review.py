@@ -5,9 +5,10 @@ POST /api/review   — AI code review (structured bugs/security/perf analysis)
 POST /api/explain  — AI code explanation (plain English)
 POST /api/refactor — AI refactor suggestions (before/after examples)
 GET  /api/history  — user's past reviews
+GET  /api/history/{review_id} — full detail for a single past review
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +21,7 @@ from app.schemas.review import (
     ExplainResponse,
     RefactorResponse,
     HistoryItem,
+    HistoryDetail,
 )
 from app.services.llm import llm_service
 from app.services.auth import get_current_user
@@ -134,3 +136,32 @@ async def get_history(
         )
         for r in reviews
     ]
+
+
+@router.get("/history/{review_id}", response_model=HistoryDetail)
+async def get_history_detail(
+    review_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the full detail of a single past review."""
+    result = await db.execute(
+        select(Review).where(Review.id == review_id, Review.user_id == user.id)
+    )
+    review = result.scalar_one_or_none()
+
+    if not review:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Review not found",
+        )
+
+    return HistoryDetail(
+        id=review.id,
+        code=review.code,
+        language=review.language,
+        review_type=review.review_type,
+        result=review.result,
+        score=review.score,
+        created_at=review.created_at.isoformat(),
+    )

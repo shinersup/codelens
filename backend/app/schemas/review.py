@@ -5,6 +5,8 @@ CodeIssue and ReviewResult models are especially important because
 they are used to force the LLM to return structured JSON instead of freeform text.
 """
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -55,10 +57,24 @@ class RefactorResponse(BaseModel):
 
 
 class HistoryItem(BaseModel):
-    """Single item in review history."""
+    """Single item in review history list."""
     id: int
     language: str
     review_type: str
+    score: int | None
+    created_at: str
+
+    class Config:
+        from_attributes = True
+
+
+class HistoryDetail(BaseModel):
+    """Full detail of a single past review."""
+    id: int
+    code: str
+    language: str
+    review_type: str
+    result: Any
     score: int | None
     created_at: str
 

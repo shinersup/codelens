@@ -62,6 +62,7 @@ export const codeAnalysis = {
 // ── History ──
 export const history = {
   getAll: () => api.get('/history'),
+  getById: (id) => api.get(`/history/${id}`),
 };
 
 // ── Health ──
