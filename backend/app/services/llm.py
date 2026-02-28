@@ -374,7 +374,7 @@ class MockLLMService:
         for bp in best_practices:
             suggestions += f"- {bp}\n"
 
-        suggestions += f"\nOverall, these refactoring suggestions would improve the code's **readability**, **maintainability**, and **robustness** without changing its core behavior."
+        suggestions += "\nOverall, these refactoring suggestions would improve the code's **readability**, **maintainability**, and **robustness** without changing its core behavior."
 
         await set_cached(cache_key, {"suggestions": suggestions}, ttl=3600)
         return suggestions, False
