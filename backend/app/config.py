@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # OpenAI
-    openai_api_key: str
+    openai_api_key: str = "sk-not-needed-in-mock-mode"
 
     # Database
     database_url: str = "postgresql+asyncpg://postgres:password@localhost:5432/codelens"
@@ -18,6 +18,9 @@ class Settings(BaseSettings):
 
     # App
     app_env: str = "development"
+
+    # Mock mode — set MOCK_LLM=true in .env to skip OpenAI calls entirely
+    mock_llm: bool = False
 
     class Config:
         env_file = ".env"
