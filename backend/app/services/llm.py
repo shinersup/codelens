@@ -88,7 +88,7 @@ class MockLLMService:
             if "TODO" in line or "FIXME" in line or "HACK" in line:
                 issues.append(CodeIssue(
                     line=i, severity="info", category="style",
-                    description=f"Unresolved comment marker found",
+                    description="Unresolved comment marker found",
                     suggestion="Address or remove this marker before production deployment",
                 ))
             if len(line) > 100:
@@ -154,20 +154,20 @@ class MockLLMService:
         num_lines = len(lines)
 
         # Detect code patterns for a smarter explanation
-        has_functions = any(("def " in l or "function " in l or "func " in l) for l in lines)
-        has_classes = any(("class " in l) for l in lines)
-        has_loops = any(("for " in l or "while " in l) for l in lines)
-        has_imports = any(("import " in l or "require(" in l or "#include" in l) for l in lines)
-        has_conditionals = any(("if " in l or "else" in l or "elif" in l or "switch" in l) for l in lines)
-        has_return = any(("return " in l) for l in lines)
-        has_print = any(("print(" in l or "console.log" in l or "fmt.Print" in l) for l in lines)
-        has_try = any(("try:" in l or "try {" in l) for l in lines)
+        has_functions = any(("def " in ln or "function " in ln or "func " in ln) for ln in lines)
+        has_classes = any(("class " in ln) for ln in lines)
+        has_loops = any(("for " in ln or "while " in ln) for ln in lines)
+        has_imports = any(("import " in ln or "require(" in ln or "#include" in ln) for ln in lines)
+        has_conditionals = any(("if " in ln or "else" in ln or "elif" in ln or "switch" in ln) for ln in lines)
+        has_return = any(("return " in ln) for ln in lines)
+        has_print = any(("print(" in ln or "console.log" in ln or "fmt.Print" in ln) for ln in lines)
+        has_try = any(("try:" in ln or "try {" in ln) for ln in lines)
 
         # Extract function/class names
         func_names = []
         class_names = []
-        for l in lines:
-            stripped = l.strip()
+        for ln in lines:
+            stripped = ln.strip()
             if stripped.startswith("def ") and "(" in stripped:
                 func_names.append(stripped.split("(")[0].replace("def ", ""))
             elif stripped.startswith("class ") and (":" in stripped or "{" in stripped):
@@ -175,7 +175,7 @@ class MockLLMService:
             elif stripped.startswith("function ") and "(" in stripped:
                 func_names.append(stripped.split("(")[0].replace("function ", ""))
 
-        explanation = f"## Overview\n\n"
+        explanation = "## Overview\n\n"
         explanation += f"This is a **{num_lines}-line {language} snippet** that "
 
         if has_classes and has_functions:
@@ -321,9 +321,9 @@ class MockLLMService:
             suggestions += "**Suggestion:** Identify logical sections within the function and extract each into a smaller, named function. Each function should do one thing well.\n\n"
 
         # Suggestion: Missing error handling
-        has_try = any("try" in l for l in lines)
-        has_file_ops = any(("open(" in l or "read(" in l or "write(" in l) for l in lines)
-        has_network = any(("request" in l.lower() or "fetch(" in l or "http" in l.lower()) for l in lines)
+        has_try = any("try" in ln for ln in lines)
+        has_file_ops = any(("open(" in ln or "read(" in ln or "write(" in ln) for ln in lines)
+        has_network = any(("request" in ln.lower() or "fetch(" in ln or "http" in ln.lower()) for ln in lines)
 
         if (has_file_ops or has_network) and not has_try:
             suggestion_count += 1
@@ -347,7 +347,7 @@ class MockLLMService:
 
         # Suggestion: Use modern language features
         has_old_format = "%" in code and ("'%" in code or '"%' in code)
-        has_concatenation = any(("+ " in l and ("'" in l or '"' in l)) for l in lines)
+        has_concatenation = any(("+ " in ln and ("'" in ln or '"' in ln)) for ln in lines)
 
         if language == "python" and (has_old_format or has_concatenation):
             suggestion_count += 1
@@ -362,8 +362,8 @@ class MockLLMService:
         suggestions += f"### {suggestion_count}. General Best Practices\n\n"
 
         best_practices = []
-        has_constants = any(l.strip() and l.strip()[0].isupper() and "=" in l and l.strip().split("=")[0].strip().isupper() for l in lines)
-        has_magic_numbers = any(any(c.isdigit() for c in l.split("#")[0]) and "range" not in l and "enumerate" not in l and "line" not in l.lower() for l in lines if l.strip() and not l.strip().startswith("#") and not l.strip().startswith("//"))
+        has_constants = any(ln.strip() and ln.strip()[0].isupper() and "=" in ln and ln.strip().split("=")[0].strip().isupper() for ln in lines)
+        has_magic_numbers = any(any(c.isdigit() for c in ln.split("#")[0]) and "range" not in ln and "enumerate" not in ln and "line" not in ln.lower() for ln in lines if ln.strip() and not ln.strip().startswith("#") and not ln.strip().startswith("//"))
 
         if has_magic_numbers and not has_constants:
             best_practices.append("**Extract magic numbers into named constants** for clarity: `MAX_RETRIES = 3` is more readable than a bare `3`")
@@ -389,7 +389,6 @@ class RealLLMService:
 
     def __init__(self):
         from langchain_openai import ChatOpenAI
-        from langchain.prompts import ChatPromptTemplate
         from langchain.output_parsers import PydanticOutputParser
 
         self.llm = ChatOpenAI(
