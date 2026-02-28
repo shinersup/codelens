@@ -48,7 +48,7 @@ export default function Navbar() {
                 </Link>
                 <div className="w-px h-5 bg-surface-5 mx-2" />
                 <span className="text-xs font-mono text-txt-muted hidden sm:inline mr-2">
-                  {user?.email}
+                  {user?.username || user?.email}
                 </span>
                 <button onClick={logout} className="btn-ghost text-txt-muted hover:text-accent-red">
                   <LogOut size={15} />

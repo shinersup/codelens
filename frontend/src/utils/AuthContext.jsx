@@ -29,7 +29,8 @@ export function AuthProvider({ children }) {
     const { access_token } = response.data;
 
     // We don't get full user info from login, store email
-    const userData = { email };
+    const savedUsername = localStorage.getItem('codelens_username');
+    const userData = { email, username: savedUsername || email };
     localStorage.setItem('codelens_token', access_token);
     localStorage.setItem('codelens_user', JSON.stringify(userData));
 
@@ -40,6 +41,7 @@ export function AuthProvider({ children }) {
 
   const register = useCallback(async (username, email, password) => {
     const response = await authApi.register(username, email, password);
+    localStorage.setItem('codelens_username', username);
     return response.data;
   }, []);
 
