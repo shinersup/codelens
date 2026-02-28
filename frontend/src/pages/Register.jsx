@@ -59,6 +59,7 @@ export default function Register() {
                 placeholder="devuser"
                 required
                 autoFocus
+                autoComplete="username"
               />
             </div>
 
@@ -73,6 +74,7 @@ export default function Register() {
                 className="input"
                 placeholder="you@example.com"
                 required
+                autoComplete="email"
               />
             </div>
 
@@ -88,6 +90,7 @@ export default function Register() {
                 placeholder="••••••••"
                 required
                 minLength={8}
+                autoComplete="new-password"
               />
               {password.length > 0 && (
                 <div className="flex items-center gap-2 mt-2">
