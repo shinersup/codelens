@@ -1,0 +1,178 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-surface-0 text-txt-primary font-body;
+    background-image:
+      radial-gradient(ellipse 80% 60% at 50% -20%, rgba(0, 229, 255, 0.04), transparent),
+      radial-gradient(ellipse 60% 40% at 80% 100%, rgba(179, 136, 255, 0.03), transparent);
+    min-height: 100vh;
+  }
+
+  ::selection {
+    background: rgba(0, 229, 255, 0.25);
+    color: #fff;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+}
+
+@layer components {
+  /* ── Buttons ── */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2
+      bg-accent-cyan/10 text-accent-cyan border border-accent-cyan/30
+      font-mono font-medium text-sm tracking-wide
+      py-2.5 px-5 rounded-lg
+      hover:bg-accent-cyan/20 hover:border-accent-cyan/50 hover:shadow-glow
+      active:scale-[0.98]
+      disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-accent-cyan/10 disabled:hover:shadow-none
+      transition-all duration-200;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2
+      bg-surface-3 text-txt-secondary border border-surface-5
+      font-mono font-medium text-sm tracking-wide
+      py-2.5 px-5 rounded-lg
+      hover:bg-surface-4 hover:text-txt-primary hover:border-txt-muted
+      active:scale-[0.98]
+      transition-all duration-200;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2
+      text-txt-secondary font-mono text-sm
+      py-2 px-3 rounded-lg
+      hover:bg-surface-3 hover:text-txt-primary
+      transition-all duration-200;
+  }
+
+  /* ── Inputs ── */
+  .input {
+    @apply w-full bg-surface-1 border border-surface-5 text-txt-primary
+      font-body text-sm
+      px-4 py-2.5 rounded-lg
+      placeholder:text-txt-muted
+      focus:outline-none focus:border-accent-cyan/50 focus:ring-1 focus:ring-accent-cyan/20
+      transition-all duration-200;
+  }
+
+  .input-mono {
+    @apply input font-mono text-sm leading-relaxed;
+  }
+
+  /* ── Cards ── */
+  .card {
+    @apply bg-surface-2 border border-surface-5 rounded-xl p-6;
+  }
+
+  .card-glow {
+    @apply card hover:border-accent-cyan/30 hover:shadow-glow transition-all duration-300;
+  }
+
+  /* ── Badges ── */
+  .badge {
+    @apply inline-flex items-center gap-1
+      font-mono text-xs font-medium tracking-wider uppercase
+      px-2.5 py-1 rounded-md;
+  }
+
+  .badge-critical {
+    @apply badge bg-accent-red/10 text-accent-red border border-accent-red/20;
+  }
+
+  .badge-warning {
+    @apply badge bg-accent-amber/10 text-accent-amber border border-accent-amber/20;
+  }
+
+  .badge-info {
+    @apply badge bg-accent-blue/10 text-accent-blue border border-accent-blue/20;
+  }
+
+  .badge-success {
+    @apply badge bg-accent-green/10 text-accent-green border border-accent-green/20;
+  }
+
+  /* ── Tab system ── */
+  .tab {
+    @apply relative font-mono text-sm tracking-wide px-4 py-2.5
+      text-txt-muted cursor-pointer
+      hover:text-txt-secondary
+      transition-colors duration-200;
+  }
+
+  .tab-active {
+    @apply tab text-accent-cyan;
+  }
+
+  .tab-active::after {
+    content: '';
+    @apply absolute bottom-0 left-2 right-2 h-px bg-accent-cyan;
+  }
+
+  /* ── Line numbers ── */
+  .line-number {
+    @apply text-txt-muted/40 select-none text-right pr-4 font-mono text-xs;
+    min-width: 3rem;
+  }
+
+  /* ── Score ring ── */
+  .score-ring {
+    @apply relative inline-flex items-center justify-center;
+  }
+
+  .score-ring svg {
+    transform: rotate(-90deg);
+  }
+}
+
+/* Noise texture overlay */
+.noise::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.015;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  z-index: 9999;
+}
+
+/* Syntax highlighter overrides */
+.syntax-highlighter {
+  background: transparent !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  font-size: 0.8125rem !important;
+  line-height: 1.7 !important;
+}
