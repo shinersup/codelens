@@ -17,6 +17,7 @@ from app.models.review import Review
 from app.models.user import User
 from app.schemas.analytics import AnalyticsResponse, LatencyStats
 from app.services.auth import get_current_user
+from app.services.cache import get_cache_stats
 
 router = APIRouter(prefix="/api", tags=["analytics"])
 
@@ -121,6 +122,9 @@ async def get_analytics(
     ).all()
     requests_by_type = {row[0]: row[1] for row in type_rows}
 
+    # --- live Redis counters (real-time, no DB query) ---
+    live_cache_counts = await get_cache_stats()
+
     return AnalyticsResponse(
         total_requests=total,
         cache_hit_rate=cache_hit_rate,
@@ -131,4 +135,5 @@ async def get_analytics(
         score_distribution=score_dist,
         issue_category_breakdown=category_counts,
         requests_by_type=requests_by_type,
+        live_cache_counts=live_cache_counts,
     )
