@@ -27,6 +27,8 @@ class CodeIssue(BaseModel):
     category: str = Field(description="bug, security, performance, or style")
     description: str = Field(description="What the issue is")
     suggestion: str = Field(description="How to fix it")
+    verified: bool = Field(default=True, description="Whether the line number was verified against actual code")
+    original_line: int | None = Field(default=None, description="Original line if corrected")
 
 
 class ReviewResult(BaseModel):

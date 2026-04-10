@@ -8,7 +8,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import engine, Base
+from app.middleware.analytics import AnalyticsMiddleware
+from app.models import analytics as _analytics_models  # noqa: F401 — ensures table is registered with Base
 from app.routers import auth, review
+from app.routers import analytics
 from app.services.cache import check_redis_health
 
 
@@ -42,9 +45,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Analytics middleware — must be added after CORS so it runs inside the CORS wrapper
+app.add_middleware(AnalyticsMiddleware)
+
 # Register routes
 app.include_router(auth.router)
 app.include_router(review.router)
+app.include_router(analytics.router)
 
 
 @app.get("/health")

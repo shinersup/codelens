@@ -8,7 +8,7 @@ GET  /api/history  — user's past reviews
 GET  /api/history/{review_id} — full detail for a single past review
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +32,7 @@ router = APIRouter(prefix="/api", tags=["review"])
 
 @router.post("/review", response_model=ReviewResponse)
 async def review_code(
+    http_request: Request,
     request: ReviewRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -44,6 +45,11 @@ async def review_code(
 
     # Call LLM
     result, was_cached = await llm_service.review_code(request.code, request.language)
+
+    # Populate state for AnalyticsMiddleware
+    http_request.state.was_cached = was_cached
+    http_request.state.language = request.language
+    http_request.state.review_type = "review"
 
     # Save to history (don't save if it was a cache hit to avoid duplicates)
     if not was_cached:
@@ -62,6 +68,7 @@ async def review_code(
 
 @router.post("/explain", response_model=ExplainResponse)
 async def explain_code(
+    http_request: Request,
     request: ReviewRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -72,6 +79,11 @@ async def explain_code(
     explanation, was_cached = await llm_service.explain_code(
         request.code, request.language
     )
+
+    # Populate state for AnalyticsMiddleware
+    http_request.state.was_cached = was_cached
+    http_request.state.language = request.language
+    http_request.state.review_type = "explain"
 
     if not was_cached:
         review = Review(
@@ -88,6 +100,7 @@ async def explain_code(
 
 @router.post("/refactor", response_model=RefactorResponse)
 async def suggest_refactor(
+    http_request: Request,
     request: ReviewRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -98,6 +111,11 @@ async def suggest_refactor(
     suggestions, was_cached = await llm_service.suggest_refactor(
         request.code, request.language
     )
+
+    # Populate state for AnalyticsMiddleware
+    http_request.state.was_cached = was_cached
+    http_request.state.language = request.language
+    http_request.state.review_type = "refactor"
 
     if not was_cached:
         review = Review(
