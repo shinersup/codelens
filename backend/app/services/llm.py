@@ -8,6 +8,8 @@ Set MOCK_LLM=true in your .env file to enable mock mode.
 from app.config import settings
 from app.schemas.review import ReviewResult, CodeIssue
 from app.services.cache import get_cached, set_cached, make_cache_key
+from app.services.sanitizer import sanitize_code_input, INJECTION_PROMPT_WARNING
+from app.services.verification import verify_issues
 
 
 # ============================================================
@@ -22,6 +24,8 @@ class MockLLMService:
         cached = await get_cached(cache_key)
         if cached:
             return ReviewResult(**cached), True
+
+        _, injection_warnings = sanitize_code_input(code)
 
         lines = code.strip().split("\n")
         issues = []
@@ -140,7 +144,14 @@ class MockLLMService:
                 "Minor style suggestions are included for further polish."
             )
 
+        if injection_warnings:
+            summary = (
+                f"Security notice: {len(injection_warnings)} prompt injection pattern(s) "
+                f"detected in submitted code. " + summary
+            )
+
         result = ReviewResult(summary=summary, issues=issues, score=score)
+        result.issues = verify_issues(code, result.issues)
         await set_cached(cache_key, result.model_dump(), ttl=3600)
         return result, False
 
@@ -407,13 +418,16 @@ class RealLLMService:
         if cached:
             return ReviewResult(**cached), True
 
+        _, injection_warnings = sanitize_code_input(code)
+        injection_warning = INJECTION_PROMPT_WARNING if injection_warnings else ""
+
         prompt = ChatPromptTemplate.from_messages([
             (
                 "system",
                 "You are an expert code reviewer with deep knowledge of {language}. "
                 "Analyze the following code for bugs, security vulnerabilities, "
                 "performance issues, and style problems. Be specific about line numbers "
-                "and provide actionable suggestions.\n\n{format_instructions}",
+                "and provide actionable suggestions.\n\n{format_instructions}{injection_warning}",
             ),
             (
                 "human",
@@ -427,8 +441,10 @@ class RealLLMService:
             "code": code,
             "language": language,
             "format_instructions": self.review_parser.get_format_instructions(),
+            "injection_warning": injection_warning,
         })
 
+        result.issues = verify_issues(code, result.issues)
         await set_cached(cache_key, result.model_dump(), ttl=3600)
         return result, False
 
@@ -440,6 +456,9 @@ class RealLLMService:
         if cached:
             return cached["explanation"], True
 
+        _, injection_warnings = sanitize_code_input(code)
+        injection_warning = INJECTION_PROMPT_WARNING if injection_warnings else ""
+
         prompt = ChatPromptTemplate.from_messages([
             (
                 "system",
@@ -447,7 +466,7 @@ class RealLLMService:
                 "Provide a clear, structured explanation covering: "
                 "1) Overall purpose, 2) Key logic and data flow, "
                 "3) Notable patterns or techniques used. "
-                "Keep it concise but thorough.",
+                "Keep it concise but thorough.{injection_warning}",
             ),
             (
                 "human",
@@ -459,6 +478,7 @@ class RealLLMService:
         response = await chain.ainvoke({
             "code": code,
             "language": language,
+            "injection_warning": injection_warning,
         })
 
         explanation = response.content
@@ -473,6 +493,9 @@ class RealLLMService:
         if cached:
             return cached["suggestions"], True
 
+        _, injection_warnings = sanitize_code_input(code)
+        injection_warning = INJECTION_PROMPT_WARNING if injection_warnings else ""
+
         prompt = ChatPromptTemplate.from_messages([
             (
                 "system",
@@ -480,7 +503,8 @@ class RealLLMService:
                 "Analyze this code and suggest specific improvements. "
                 "For each suggestion: 1) Explain the issue, "
                 "2) Show the before code, 3) Show the after code. "
-                "Focus on readability, performance, modern best practices, and DRY.",
+                "Focus on readability, performance, modern best practices, and DRY."
+                "{injection_warning}",
             ),
             (
                 "human",
@@ -492,6 +516,7 @@ class RealLLMService:
         response = await chain.ainvoke({
             "code": code,
             "language": language,
+            "injection_warning": injection_warning,
         })
 
         suggestions = response.content
