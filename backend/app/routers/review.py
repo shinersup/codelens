@@ -8,7 +8,7 @@ GET  /api/history  — user's past reviews
 GET  /api/history/{review_id} — full detail for a single past review
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +21,7 @@ from app.schemas.review import (
     ExplainResponse,
     RefactorResponse,
     HistoryItem,
+    HistoryPage,
     HistoryDetail,
 )
 from app.services.llm import llm_service
@@ -130,21 +131,38 @@ async def suggest_refactor(
     return RefactorResponse(suggestions=suggestions, cached=was_cached)
 
 
-@router.get("/history", response_model=list[HistoryItem])
+_MAX_LIMIT = 50
+
+@router.get("/history", response_model=HistoryPage)
 async def get_history(
+    after_id: int | None = Query(default=None, description="Return items with id < after_id (cursor)"),
+    limit: int = Query(default=20, ge=1, le=_MAX_LIMIT, description="Number of items to return"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get the current user's review history (most recent first)."""
-    result = await db.execute(
+    """
+    Get the current user's review history, most recent first.
+
+    Cursor-based pagination via `after_id` + `limit`.
+    Pass the returned `next_cursor` as `after_id` on the next request.
+    `next_cursor` is None when there are no more results.
+    """
+    query = (
         select(Review)
         .where(Review.user_id == user.id)
-        .order_by(Review.created_at.desc())
-        .limit(50)
+        .order_by(Review.id.desc())
     )
-    reviews = result.scalars().all()
+    if after_id is not None:
+        query = query.where(Review.id < after_id)
 
-    return [
+    # Fetch one extra row to determine whether another page exists
+    result = await db.execute(query.limit(limit + 1))
+    rows = result.scalars().all()
+
+    has_more = len(rows) > limit
+    page_rows = rows[:limit]
+
+    items = [
         HistoryItem(
             id=r.id,
             language=r.language,
@@ -152,8 +170,13 @@ async def get_history(
             score=r.score,
             created_at=r.created_at.isoformat(),
         )
-        for r in reviews
+        for r in page_rows
     ]
+
+    return HistoryPage(
+        items=items,
+        next_cursor=page_rows[-1].id if has_more else None,
+    )
 
 
 @router.get("/history/{review_id}", response_model=HistoryDetail)

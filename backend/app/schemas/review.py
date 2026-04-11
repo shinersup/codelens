@@ -70,6 +70,12 @@ class HistoryItem(BaseModel):
         from_attributes = True
 
 
+class HistoryPage(BaseModel):
+    """Paginated history response."""
+    items: list[HistoryItem]
+    next_cursor: int | None  # ID to pass as after_id for the next page; None = no more results
+
+
 class HistoryDetail(BaseModel):
     """Full detail of a single past review."""
     id: int

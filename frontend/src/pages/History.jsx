@@ -149,6 +149,9 @@ function HistoryDetailView({ detail, onBack, onDelete }) {
 export default function History() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState(null);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState('');
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -161,11 +164,28 @@ export default function History() {
   const loadHistory = async () => {
     try {
       const response = await historyApi.getAll();
-      setItems(response.data);
+      setItems(response.data.items);
+      setNextCursor(response.data.next_cursor);
+      setHasMore(response.data.next_cursor != null);
     } catch (err) {
       setError('Failed to load history.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadMore = async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const response = await historyApi.getAll({ afterId: nextCursor });
+      setItems((prev) => [...prev, ...response.data.items]);
+      setNextCursor(response.data.next_cursor);
+      setHasMore(response.data.next_cursor != null);
+    } catch (err) {
+      setError('Failed to load more history.');
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -235,7 +255,7 @@ export default function History() {
             <div>
               <h1 className="font-display font-bold text-xl text-txt-primary">Review History</h1>
               <p className="text-sm text-txt-muted mt-1">
-                Your last 50 code analyses, most recent first.
+                Your code analyses, most recent first.
               </p>
             </div>
             {items.length > 0 && (
@@ -277,52 +297,71 @@ export default function History() {
           )}
 
           {!loading && items.length > 0 && (
-            <div className="card p-0 overflow-hidden">
-              <div className="divide-y divide-surface-5">
-                {items.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => loadDetail(item.id)}
-                    className="w-full flex items-center gap-4 px-5 py-3.5 hover:bg-surface-3/30 transition-colors text-left"
-                  >
-                    {/* Type icon */}
-                    <div className="shrink-0">{getTypeIcon(item.review_type)}</div>
+            <>
+              <div className="card p-0 overflow-hidden">
+                <div className="divide-y divide-surface-5">
+                  {items.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => loadDetail(item.id)}
+                      className="w-full flex items-center gap-4 px-5 py-3.5 hover:bg-surface-3/30 transition-colors text-left"
+                    >
+                      {/* Type icon */}
+                      <div className="shrink-0">{getTypeIcon(item.review_type)}</div>
 
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`badge border text-[10px] ${getTypeBadgeClass(item.review_type)}`}>
-                          {getTypeLabel(item.review_type)}
-                        </span>
-                        <span className="font-mono text-xs text-txt-secondary">
-                          {item.language}
-                        </span>
+                      {/* Info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`badge border text-[10px] ${getTypeBadgeClass(item.review_type)}`}>
+                            {getTypeLabel(item.review_type)}
+                          </span>
+                          <span className="font-mono text-xs text-txt-secondary">
+                            {item.language}
+                          </span>
+                        </div>
                       </div>
-                    </div>
 
-                    {/* Score (review only) */}
-                    <div className="shrink-0 w-12 text-right">
-                      {item.score != null ? (
-                        <span className={`font-display font-bold text-sm ${getScoreColor(item.score)}`}>
-                          {item.score}/10
-                        </span>
-                      ) : (
-                        <span className="text-txt-muted/30">—</span>
-                      )}
-                    </div>
+                      {/* Score (review only) */}
+                      <div className="shrink-0 w-12 text-right">
+                        {item.score != null ? (
+                          <span className={`font-display font-bold text-sm ${getScoreColor(item.score)}`}>
+                            {item.score}/10
+                          </span>
+                        ) : (
+                          <span className="text-txt-muted/30">—</span>
+                        )}
+                      </div>
 
-                    {/* Time */}
-                    <div className="shrink-0 flex items-center gap-1.5 text-txt-muted">
-                      <Clock size={11} />
-                      <span className="font-mono text-[10px]">{formatDate(item.created_at)}</span>
-                    </div>
+                      {/* Time */}
+                      <div className="shrink-0 flex items-center gap-1.5 text-txt-muted">
+                        <Clock size={11} />
+                        <span className="font-mono text-[10px]">{formatDate(item.created_at)}</span>
+                      </div>
 
-                    {/* Arrow */}
-                    <ChevronRight size={14} className="shrink-0 text-txt-muted/30" />
-                  </button>
-                ))}
+                      {/* Arrow */}
+                      <ChevronRight size={14} className="shrink-0 text-txt-muted/30" />
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+
+              {/* Load more */}
+              {hasMore && (
+                <div className="flex justify-center mt-4">
+                  <button
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    className="btn-ghost text-xs text-txt-muted"
+                  >
+                    {loadingMore ? (
+                      <><Loader2 size={12} className="animate-spin" /> Loading...</>
+                    ) : (
+                      'Load more'
+                    )}
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </>
       )}

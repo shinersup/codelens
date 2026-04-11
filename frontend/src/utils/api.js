@@ -61,7 +61,12 @@ export const codeAnalysis = {
 
 // ── History ──
 export const history = {
-  getAll: () => api.get('/history'),
+  getAll: ({ afterId, limit } = {}) => {
+    const params = {};
+    if (afterId != null) params.after_id = afterId;
+    if (limit != null) params.limit = limit;
+    return api.get('/history', { params });
+  },
   getById: (id) => api.get(`/history/${id}`),
   delete: (id) => api.delete(`/history/${id}`),
   clearAll: () => api.delete('/history'),
