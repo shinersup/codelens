@@ -5,11 +5,64 @@ Supports MOCK_LLM=true mode for free testing without OpenAI API calls.
 Set MOCK_LLM=true in your .env file to enable mock mode.
 """
 
+import logging
+
+from tenacity import (
+    AsyncRetrying,
+    before_sleep_log,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
+
 from app.config import settings
 from app.schemas.review import ReviewResult, CodeIssue
 from app.services.cache import get_cached, set_cached, make_cache_key
 from app.services.sanitizer import sanitize_code_input, INJECTION_PROMPT_WARNING
 from app.services.verification import verify_issues
+
+logger = logging.getLogger(__name__)
+
+# ── Retry helpers ────────────────────────────────────────────
+
+def _is_retryable(exc: BaseException) -> bool:
+    """Return True for transient OpenAI errors that are worth retrying."""
+    try:
+        import openai
+        return isinstance(exc, (
+            openai.RateLimitError,
+            openai.APITimeoutError,
+            openai.APIConnectionError,
+        ))
+    except ImportError:
+        return False
+
+def _retry():
+    """
+    Return a configured AsyncRetrying context: 3 attempts, exponential
+    backoff 1–10 s, only on transient OpenAI errors.
+    """
+    return AsyncRetrying(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception(_is_retryable),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,   # re-raise the real exception if all retries fail
+    )
+
+# ── Structured fallback responses on exhausted retries ───────
+
+_ERROR_REVIEW = ReviewResult(
+    summary=(
+        "The AI service is temporarily unavailable — this is usually a rate-limit "
+        "or network timeout. Please try again in a moment."
+    ),
+    issues=[],
+    score=1,
+)
+_ERROR_TEXT = (
+    "The AI service is temporarily unavailable. Please try again in a moment."
+)
 
 
 # ============================================================
@@ -437,12 +490,18 @@ class RealLLMService:
 
         chain = prompt | self.llm | self.review_parser
 
-        result = await chain.ainvoke({
-            "code": code,
-            "language": language,
-            "format_instructions": self.review_parser.get_format_instructions(),
-            "injection_warning": injection_warning,
-        })
+        try:
+            async for attempt in _retry():
+                with attempt:
+                    result = await chain.ainvoke({
+                        "code": code,
+                        "language": language,
+                        "format_instructions": self.review_parser.get_format_instructions(),
+                        "injection_warning": injection_warning,
+                    })
+        except Exception as exc:
+            logger.error("review_code failed after retries: %s", exc)
+            return _ERROR_REVIEW, False
 
         result.issues = verify_issues(code, result.issues)
         await set_cached(cache_key, result.model_dump(), ttl=3600)
@@ -475,11 +534,18 @@ class RealLLMService:
         ])
 
         chain = prompt | self.llm
-        response = await chain.ainvoke({
-            "code": code,
-            "language": language,
-            "injection_warning": injection_warning,
-        })
+
+        try:
+            async for attempt in _retry():
+                with attempt:
+                    response = await chain.ainvoke({
+                        "code": code,
+                        "language": language,
+                        "injection_warning": injection_warning,
+                    })
+        except Exception as exc:
+            logger.error("explain_code failed after retries: %s", exc)
+            return _ERROR_TEXT, False
 
         explanation = response.content
         await set_cached(cache_key, {"explanation": explanation}, ttl=3600)
@@ -513,11 +579,18 @@ class RealLLMService:
         ])
 
         chain = prompt | self.llm
-        response = await chain.ainvoke({
-            "code": code,
-            "language": language,
-            "injection_warning": injection_warning,
-        })
+
+        try:
+            async for attempt in _retry():
+                with attempt:
+                    response = await chain.ainvoke({
+                        "code": code,
+                        "language": language,
+                        "injection_warning": injection_warning,
+                    })
+        except Exception as exc:
+            logger.error("suggest_refactor failed after retries: %s", exc)
+            return _ERROR_TEXT, False
 
         suggestions = response.content
         await set_cached(cache_key, {"suggestions": suggestions}, ttl=3600)
