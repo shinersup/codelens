@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Scan, BookOpen, GitBranch, Loader2 } from 'lucide-react';
-import { codeAnalysis } from '../utils/api';
+import { codeAnalysis, feedback as feedbackApi } from '../utils/api';
 import CodeEditor from '../components/CodeEditor';
 import ReviewResults from '../components/ReviewResults';
 import TextResults from '../components/TextResults';
@@ -17,12 +17,23 @@ export default function Analyze() {
   const [result, setResult] = useState(null);
   const [resultType, setResultType] = useState(null);
   const [cached, setCached] = useState(false);
+  const [reviewId, setReviewId] = useState(null);
   const [error, setError] = useState('');
+
+  const handleFeedback = async (issueIndex, isApplied, category) => {
+    if (!reviewId) return;
+    try {
+      await feedbackApi.submit(reviewId, issueIndex, isApplied, category);
+    } catch {
+      // Feedback is best-effort — silently ignore errors
+    }
+  };
 
   const handleSubmit = async (code, language) => {
     setLoading(true);
     setError('');
     setResult(null);
+    setReviewId(null);
 
     try {
       let response;
@@ -32,6 +43,7 @@ export default function Analyze() {
           setResult(response.data.review);
           setResultType('review');
           setCached(response.data.cached);
+          setReviewId(response.data.review_id ?? null);
           break;
         case 'explain':
           response = await codeAnalysis.explain(code, language);
@@ -88,7 +100,7 @@ export default function Analyze() {
           return (
             <button
               key={m.id}
-              onClick={() => { setMode(m.id); setResult(null); setError(''); }}
+              onClick={() => { setMode(m.id); setResult(null); setReviewId(null); setError(''); }}
               className={`
                 flex items-center gap-2 px-4 py-2.5 rounded-lg font-mono text-xs tracking-wide
                 border transition-all duration-200
@@ -141,7 +153,12 @@ export default function Analyze() {
           )}
 
           {!loading && result && resultType === 'review' && (
-            <ReviewResults result={result} cached={cached} />
+            <ReviewResults
+              result={result}
+              cached={cached}
+              reviewId={reviewId}
+              onFeedback={handleFeedback}
+            />
           )}
 
           {!loading && result && (resultType === 'explain' || resultType === 'refactor') && (

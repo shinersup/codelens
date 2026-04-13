@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { history as historyApi } from '../utils/api';
+import { history as historyApi, feedback as feedbackApi } from '../utils/api';
 import ReviewResults from '../components/ReviewResults';
 import TextResults from '../components/TextResults';
 import {
@@ -66,7 +66,7 @@ function formatDate(isoString) {
 }
 
 // ── Detail View ──
-function HistoryDetailView({ detail, onBack, onDelete }) {
+function HistoryDetailView({ detail, onBack, onDelete, feedbackMap, onFeedback }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const handleDelete = () => {
@@ -131,7 +131,13 @@ function HistoryDetailView({ detail, onBack, onDelete }) {
 
       {/* Results */}
       {detail.review_type === 'review' && detail.result && (
-        <ReviewResults result={detail.result} cached={false} />
+        <ReviewResults
+          result={detail.result}
+          cached={false}
+          reviewId={detail.id}
+          feedbackMap={feedbackMap}
+          onFeedback={onFeedback}
+        />
       )}
 
       {detail.review_type === 'explain' && detail.result?.explanation && (
@@ -155,6 +161,7 @@ export default function History() {
   const [error, setError] = useState('');
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [feedbackMap, setFeedbackMap] = useState({});
   const [confirmClear, setConfirmClear] = useState(false);
 
   useEffect(() => {
@@ -192,13 +199,35 @@ export default function History() {
   const loadDetail = async (id) => {
     setDetailLoading(true);
     setError('');
+    setFeedbackMap({});
     try {
-      const response = await historyApi.getById(id);
-      setDetail(response.data);
+      const [detailRes, fbRes] = await Promise.all([
+        historyApi.getById(id),
+        feedbackApi.getAll(id).catch(() => ({ data: { feedbacks: [] } })),
+      ]);
+      setDetail(detailRes.data);
+      // Build {issueIndex: applied} map from feedback records
+      const map = {};
+      for (const fb of fbRes.data.feedbacks ?? []) {
+        map[fb.issue_index] = fb.applied;
+      }
+      setFeedbackMap(map);
     } catch (err) {
       setError('Failed to load review details.');
     } finally {
       setDetailLoading(false);
+    }
+  };
+
+  const handleFeedback = async (issueIndex, isApplied, category) => {
+    if (!detail) return;
+    // Optimistic update
+    setFeedbackMap((prev) => ({ ...prev, [issueIndex]: isApplied }));
+    try {
+      await feedbackApi.submit(detail.id, issueIndex, isApplied, category);
+    } catch {
+      // Best-effort; revert on failure
+      setFeedbackMap((prev) => ({ ...prev, [issueIndex]: !isApplied }));
     }
   };
 
@@ -229,6 +258,7 @@ export default function History() {
 
   const handleBack = () => {
     setDetail(null);
+    setFeedbackMap({});
   };
 
   return (
@@ -239,6 +269,8 @@ export default function History() {
           detail={detail}
           onBack={handleBack}
           onDelete={handleDeleteOne}
+          feedbackMap={feedbackMap}
+          onFeedback={handleFeedback}
         />
       )}
 

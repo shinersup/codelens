@@ -1,5 +1,5 @@
 """
-CodeLens Test Suite — 63 tests
+CodeLens Test Suite — 69 tests
 """
 
 import pytest
@@ -660,8 +660,8 @@ class TestAnalytics:
         assert response.status_code == 401
 
     def test_analytics_response_schema_shape(self):
-        """AnalyticsResponse must include live_cache_counts alongside DB-derived fields."""
-        from app.schemas.analytics import AnalyticsResponse, LatencyStats
+        """AnalyticsResponse must include live_cache_counts and feedback alongside DB-derived fields."""
+        from app.schemas.analytics import AnalyticsResponse, FeedbackStats, LatencyStats
         resp = AnalyticsResponse(
             total_requests=100,
             cache_hit_rate=0.38,
@@ -670,9 +670,211 @@ class TestAnalytics:
             issue_category_breakdown={"security": 34, "bug": 22, "style": 41},
             requests_by_type={"review": 48, "explain": 31, "refactor": 22},
             live_cache_counts={"hits": 38, "misses": 62},
+            feedback=FeedbackStats(
+                total_feedback=0,
+                applied_count=0,
+                application_rate=None,
+                applied_by_category={},
+            ),
         )
         assert resp.total_requests == 100
         assert resp.cache_hit_rate == 0.38
         assert resp.live_cache_counts["hits"] == 38
         assert resp.live_cache_counts["misses"] == 62
         assert resp.avg_latency_ms.cached_ms == 42.3
+
+
+# ============================================================
+# 12. FEEDBACK LOOP (5 tests)
+# ============================================================
+
+class TestFeedback:
+    """
+    POST /api/history/{id}/feedback — upsert applied/not-applied for one issue.
+    GET  /api/history/{id}/feedback — restore applied state from history.
+
+    Feedback is scoped to the owning user: another user's review_id returns 404.
+    The analytics endpoint exposes aggregate application rate via FeedbackStats.
+    """
+
+    @pytest.mark.asyncio
+    async def test_feedback_post_requires_auth(self, client):
+        """POST /api/history/{id}/feedback should return 401 without a token."""
+        response = await client.post(
+            "/api/history/1/feedback",
+            json={"issue_index": 0, "applied": True},
+        )
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_feedback_get_requires_auth(self, client):
+        """GET /api/history/{id}/feedback should return 401 without a token."""
+        response = await client.get("/api/history/1/feedback")
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_submit_feedback_creates_record(self, client):
+        """POST feedback on an owned review returns the feedback list with applied state."""
+        from app.main import app
+        from app.db import get_db
+        from app.models.feedback import IssueFeedback
+        from app.models.review import Review
+        from app.models.user import User
+        from app.services.auth import get_current_user
+
+        mock_user = User(id=1, email="u@test.com", username="u", hashed_password="x")
+
+        async def override_user():
+            return mock_user
+
+        mock_db = AsyncMock()
+
+        # execute call 1: _get_own_review — review exists and belongs to user 1
+        owned_review = Review(
+            id=5, user_id=1, code="x", language="python",
+            review_type="review", result={}, score=7,
+        )
+        r1 = MagicMock()
+        r1.scalar_one_or_none.return_value = owned_review
+
+        # execute call 2: existing feedback check — None → new insert path
+        r2 = MagicMock()
+        r2.scalar_one_or_none.return_value = None
+
+        # execute call 3: fetch all feedbacks after insert
+        inserted = IssueFeedback(review_id=5, issue_index=0, applied=True, user_id=1)
+        r3 = MagicMock()
+        r3.scalars.return_value.all.return_value = [inserted]
+
+        mock_db.execute = AsyncMock(side_effect=[r1, r2, r3])
+        mock_db.flush = AsyncMock()
+        mock_db.add = MagicMock()
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_current_user] = override_user
+        app.dependency_overrides[get_db] = override_db
+        try:
+            response = await client.post(
+                "/api/history/5/feedback",
+                json={"issue_index": 0, "applied": True, "category": "security"},
+            )
+            assert response.status_code == 200
+            data = response.json()
+            assert data["review_id"] == 5
+            assert len(data["feedbacks"]) == 1
+            assert data["feedbacks"][0]["issue_index"] == 0
+            assert data["feedbacks"][0]["applied"] is True
+        finally:
+            app.dependency_overrides.clear()
+
+    @pytest.mark.asyncio
+    async def test_submit_feedback_upserts_not_duplicates(self, client):
+        """Calling POST feedback twice for the same issue updates the record, not inserts."""
+        from app.main import app
+        from app.db import get_db
+        from app.models.feedback import IssueFeedback
+        from app.models.review import Review
+        from app.models.user import User
+        from app.services.auth import get_current_user
+
+        mock_user = User(id=1, email="u@test.com", username="u", hashed_password="x")
+
+        async def override_user():
+            return mock_user
+
+        mock_db = AsyncMock()
+
+        r1 = MagicMock()
+        r1.scalar_one_or_none.return_value = Review(
+            id=5, user_id=1, code="x", language="python",
+            review_type="review", result={}, score=7,
+        )
+
+        # Existing feedback record found → triggers the update branch
+        existing = IssueFeedback(review_id=5, issue_index=0, applied=True, user_id=1, category="bug")
+        r2 = MagicMock()
+        r2.scalar_one_or_none.return_value = existing
+
+        # After update, fetch all — still exactly one record
+        updated = IssueFeedback(review_id=5, issue_index=0, applied=False, user_id=1)
+        r3 = MagicMock()
+        r3.scalars.return_value.all.return_value = [updated]
+
+        mock_db.execute = AsyncMock(side_effect=[r1, r2, r3])
+        mock_db.flush = AsyncMock()
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_current_user] = override_user
+        app.dependency_overrides[get_db] = override_db
+        try:
+            response = await client.post(
+                "/api/history/5/feedback",
+                json={"issue_index": 0, "applied": False},
+            )
+            assert response.status_code == 200
+            data = response.json()
+            assert len(data["feedbacks"]) == 1        # still one — not two
+            assert data["feedbacks"][0]["applied"] is False
+            mock_db.add.assert_not_called()           # update path — no new row added
+        finally:
+            app.dependency_overrides.clear()
+
+    @pytest.mark.asyncio
+    async def test_feedback_returns_404_for_unowned_review(self, client):
+        """Submitting feedback for another user's review_id must return 404."""
+        from app.main import app
+        from app.db import get_db
+        from app.models.user import User
+        from app.services.auth import get_current_user
+
+        # User 99 tries to submit feedback on review that belongs to user 1
+        mock_user = User(id=99, email="other@test.com", username="other", hashed_password="x")
+
+        async def override_user():
+            return mock_user
+
+        mock_db = AsyncMock()
+        r1 = MagicMock()
+        r1.scalar_one_or_none.return_value = None   # _get_own_review finds nothing for user 99
+        mock_db.execute = AsyncMock(return_value=r1)
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_current_user] = override_user
+        app.dependency_overrides[get_db] = override_db
+        try:
+            response = await client.post(
+                "/api/history/5/feedback",
+                json={"issue_index": 0, "applied": True},
+            )
+            assert response.status_code == 404
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_analytics_response_includes_feedback_stats(self):
+        """AnalyticsResponse.feedback block must expose application_rate and applied_by_category."""
+        from app.schemas.analytics import AnalyticsResponse, FeedbackStats, LatencyStats
+        resp = AnalyticsResponse(
+            total_requests=50,
+            cache_hit_rate=0.33,
+            avg_latency_ms=LatencyStats(cached_ms=5.4, uncached_ms=449.0),
+            score_distribution={"1-3": 1, "4-6": 3, "7-9": 7, "10": 1},
+            issue_category_breakdown={"security": 9, "style": 16},
+            requests_by_type={"review": 30, "explain": 12, "refactor": 8},
+            live_cache_counts={"hits": 14, "misses": 28},
+            feedback=FeedbackStats(
+                total_feedback=12,
+                applied_count=8,
+                application_rate=0.667,
+                applied_by_category={"security": 5, "style": 3},
+            ),
+        )
+        assert resp.feedback.total_feedback == 12
+        assert resp.feedback.applied_count == 8
+        assert resp.feedback.application_rate == 0.667
+        assert resp.feedback.applied_by_category["security"] == 5

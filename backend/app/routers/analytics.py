@@ -13,9 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.models.analytics import RequestLog
+from app.models.feedback import IssueFeedback
 from app.models.review import Review
 from app.models.user import User
-from app.schemas.analytics import AnalyticsResponse, LatencyStats
+from app.schemas.analytics import AnalyticsResponse, FeedbackStats, LatencyStats
 from app.services.auth import get_current_user
 from app.services.cache import get_cache_stats
 
@@ -125,6 +126,33 @@ async def get_analytics(
     # --- live Redis counters (real-time, no DB query) ---
     live_cache_counts = await get_cache_stats()
 
+    # --- feedback stats ---
+    total_fb = (
+        await db.execute(select(func.count()).select_from(IssueFeedback))
+    ).scalar() or 0
+
+    applied_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(IssueFeedback)
+            .where(IssueFeedback.applied.is_(True))
+        )
+    ).scalar() or 0
+
+    application_rate = round(applied_count / total_fb, 3) if total_fb > 0 else None
+
+    fb_by_cat_rows = (
+        await db.execute(
+            select(IssueFeedback.category, func.count())
+            .where(
+                IssueFeedback.applied.is_(True),
+                IssueFeedback.category.isnot(None),
+            )
+            .group_by(IssueFeedback.category)
+        )
+    ).all()
+    applied_by_category = {row[0]: row[1] for row in fb_by_cat_rows}
+
     return AnalyticsResponse(
         total_requests=total,
         cache_hit_rate=cache_hit_rate,
@@ -136,4 +164,10 @@ async def get_analytics(
         issue_category_breakdown=category_counts,
         requests_by_type=requests_by_type,
         live_cache_counts=live_cache_counts,
+        feedback=FeedbackStats(
+            total_feedback=total_fb,
+            applied_count=applied_count,
+            application_rate=application_rate,
+            applied_by_category=applied_by_category,
+        ),
     )

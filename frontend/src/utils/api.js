@@ -72,6 +72,18 @@ export const history = {
   clearAll: () => api.delete('/history'),
 };
 
+// ── Feedback ──
+export const feedback = {
+  getAll: (reviewId) =>
+    api.get(`/history/${reviewId}/feedback`),
+  submit: (reviewId, issueIndex, applied, category) =>
+    api.post(`/history/${reviewId}/feedback`, {
+      issue_index: issueIndex,
+      applied,
+      category: category ?? null,
+    }),
+};
+
 // ── Health ──
 export const health = {
   check: () => api.get('/health'),

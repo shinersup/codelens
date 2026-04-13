@@ -44,6 +44,7 @@ class ReviewResponse(BaseModel):
     """What we send back for a code review."""
     review: ReviewResult
     cached: bool = False
+    review_id: int | None = None   # None when result was served from cache (no new DB row)
 
 
 class ExplainResponse(BaseModel):

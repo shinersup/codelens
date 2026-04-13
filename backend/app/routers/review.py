@@ -53,6 +53,7 @@ async def review_code(
     http_request.state.review_type = "review"
 
     # Save to history (don't save if it was a cache hit to avoid duplicates)
+    review_id = None
     if not was_cached:
         review = Review(
             user_id=user.id,
@@ -63,8 +64,10 @@ async def review_code(
             score=result.score,
         )
         db.add(review)
+        await db.flush()
+        review_id = review.id
 
-    return ReviewResponse(review=result, cached=was_cached)
+    return ReviewResponse(review=result, cached=was_cached, review_id=review_id)
 
 
 @router.post("/explain", response_model=ExplainResponse)
