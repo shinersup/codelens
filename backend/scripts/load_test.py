@@ -27,7 +27,7 @@ import asyncio
 import random
 import string
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 import httpx
@@ -293,7 +293,7 @@ async def run_load_test(base_url: str, n: int) -> None:
         except RuntimeError as exc:
             print(f"  FATAL: {exc}")
             return
-        print(f"  OK — token acquired\n")
+        print("  OK — token acquired\n")
 
         # ── Fire N concurrent tasks ──
         print(f"Firing {n} concurrent requests to POST /api/review/async …")
@@ -341,12 +341,12 @@ async def run_load_test(base_url: str, n: int) -> None:
             print(f"  [{r.request_index}] {r.submit_error}")
 
     if failed:
-        print(f"\nFailed tasks (first 5 task IDs):")
+        print("\nFailed tasks (first 5 task IDs):")
         for r in failed[:5]:
             print(f"  [{r.request_index}] task_id={r.task_id}")
 
     if timed_out:
-        print(f"\nTimed-out tasks (first 5 task IDs):")
+        print("\nTimed-out tasks (first 5 task IDs):")
         for r in timed_out[:5]:
             print(f"  [{r.request_index}] task_id={r.task_id}")
 
