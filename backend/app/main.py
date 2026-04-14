@@ -12,7 +12,7 @@ from app.middleware.analytics import AnalyticsMiddleware
 from app.models import analytics as _analytics_models  # noqa: F401 — ensures table is registered with Base
 from app.models import feedback as _feedback_models    # noqa: F401 — ensures issue_feedback table is registered
 from app.routers import auth, review
-from app.routers import analytics, feedback
+from app.routers import analytics, feedback, tasks
 from app.services.cache import check_redis_health
 
 
@@ -54,6 +54,7 @@ app.include_router(auth.router)
 app.include_router(review.router)
 app.include_router(analytics.router)
 app.include_router(feedback.router)
+app.include_router(tasks.router)
 
 
 @app.get("/health")

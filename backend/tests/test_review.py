@@ -1,5 +1,5 @@
 """
-CodeLens Test Suite — 69 tests
+CodeLens Test Suite — 76 tests
 """
 
 import pytest
@@ -878,3 +878,185 @@ class TestFeedback:
         assert resp.feedback.applied_count == 8
         assert resp.feedback.application_rate == 0.667
         assert resp.feedback.applied_by_category["security"] == 5
+
+
+# ============================================================
+# 13. CELERY TASK QUEUE (7 tests)
+# ============================================================
+
+class TestAsyncTasks:
+    """
+    POST /api/review/async   — submit a review task, returns 202 + task_id
+    POST /api/explain/async  — submit an explain task
+    POST /api/refactor/async — submit a refactor task
+    GET  /api/tasks/{id}     — poll task status; returns pending/processing/complete/failed
+
+    All LLM work happens inside the Celery worker (separate process). Tests mock
+    the task's .delay() call and Celery's AsyncResult so CI never needs a live worker.
+    """
+
+    @pytest.mark.asyncio
+    async def test_review_async_requires_auth(self, client):
+        """POST /api/review/async should return 401 without a token."""
+        response = await client.post(
+            "/api/review/async",
+            json={"code": "print('hi')", "language": "python"},
+        )
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_review_async_returns_202_with_task_id(self, client):
+        """Submitting a review task returns 202 Accepted and a task_id string."""
+        from app.main import app
+        from app.db import get_db
+        from app.models.user import User
+        from app.services.auth import get_current_user
+
+        mock_user = User(id=1, email="u@test.com", username="u", hashed_password="x")
+
+        async def override_user():
+            return mock_user
+
+        async def override_db():
+            yield AsyncMock()
+
+        # Mock the Celery task's .delay() to avoid needing a real broker
+        mock_task_result = MagicMock()
+        mock_task_result.id = "abc-123-task-id"
+
+        app.dependency_overrides[get_current_user] = override_user
+        app.dependency_overrides[get_db] = override_db
+        try:
+            with patch("app.routers.tasks.check_rate_limit", new_callable=AsyncMock), \
+                 patch("app.tasks.review.task_review_code.delay", return_value=mock_task_result):
+                response = await client.post(
+                    "/api/review/async",
+                    json={"code": "x = 1", "language": "python"},
+                )
+            assert response.status_code == 202
+            data = response.json()
+            assert "task_id" in data
+            assert data["task_id"] == "abc-123-task-id"
+        finally:
+            app.dependency_overrides.clear()
+
+    @pytest.mark.asyncio
+    async def test_explain_async_returns_202(self, client):
+        """POST /api/explain/async returns 202 with a task_id."""
+        from app.main import app
+        from app.models.user import User
+        from app.services.auth import get_current_user
+
+        mock_user = User(id=1, email="u@test.com", username="u", hashed_password="x")
+
+        async def override_user():
+            return mock_user
+
+        mock_task_result = MagicMock()
+        mock_task_result.id = "explain-task-id"
+
+        app.dependency_overrides[get_current_user] = override_user
+        try:
+            with patch("app.routers.tasks.check_rate_limit", new_callable=AsyncMock), \
+                 patch("app.tasks.review.task_explain_code.delay", return_value=mock_task_result):
+                response = await client.post(
+                    "/api/explain/async",
+                    json={"code": "x = 1", "language": "python"},
+                )
+            assert response.status_code == 202
+            assert response.json()["task_id"] == "explain-task-id"
+        finally:
+            app.dependency_overrides.clear()
+
+    @pytest.mark.asyncio
+    async def test_task_status_requires_auth(self, client):
+        """GET /api/tasks/{id} should return 401 without a token."""
+        response = await client.get("/api/tasks/some-task-id")
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_task_status_pending(self, client):
+        """A queued task that hasn't started yet returns status='pending'."""
+        from app.main import app
+        from app.models.user import User
+        from app.services.auth import get_current_user
+
+        mock_user = User(id=1, email="u@test.com", username="u", hashed_password="x")
+
+        async def override_user():
+            return mock_user
+
+        mock_ar = MagicMock()
+        mock_ar.state = "PENDING"
+
+        app.dependency_overrides[get_current_user] = override_user
+        try:
+            with patch("celery.result.AsyncResult", return_value=mock_ar):
+                response = await client.get("/api/tasks/pending-task-id")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["status"] == "pending"
+            assert data["result"] is None
+        finally:
+            app.dependency_overrides.clear()
+
+    @pytest.mark.asyncio
+    async def test_task_status_complete_returns_result(self, client):
+        """A finished task returns status='complete' with the result payload."""
+        from app.main import app
+        from app.models.user import User
+        from app.services.auth import get_current_user
+
+        mock_user = User(id=1, email="u@test.com", username="u", hashed_password="x")
+
+        async def override_user():
+            return mock_user
+
+        task_payload = {
+            "review": {"summary": "All good", "issues": [], "score": 9},
+            "cached": False,
+            "review_id": 42,
+        }
+        mock_ar = MagicMock()
+        mock_ar.state = "SUCCESS"
+        mock_ar.result = task_payload
+
+        app.dependency_overrides[get_current_user] = override_user
+        try:
+            with patch("celery.result.AsyncResult", return_value=mock_ar):
+                response = await client.get("/api/tasks/done-task-id")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["status"] == "complete"
+            assert data["result"]["review"]["score"] == 9
+            assert data["result"]["review_id"] == 42
+        finally:
+            app.dependency_overrides.clear()
+
+    @pytest.mark.asyncio
+    async def test_task_status_failed_returns_error(self, client):
+        """A failed task returns status='failed' with an error message."""
+        from app.main import app
+        from app.models.user import User
+        from app.services.auth import get_current_user
+
+        mock_user = User(id=1, email="u@test.com", username="u", hashed_password="x")
+
+        async def override_user():
+            return mock_user
+
+        mock_ar = MagicMock()
+        mock_ar.state = "FAILURE"
+        mock_ar.result = RuntimeError("OpenAI timeout")
+
+        app.dependency_overrides[get_current_user] = override_user
+        try:
+            with patch("celery.result.AsyncResult", return_value=mock_ar):
+                response = await client.get("/api/tasks/failed-task-id")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["status"] == "failed"
+            assert "error" in data["result"]
+            assert "OpenAI timeout" in data["result"]["error"]
+        finally:
+            app.dependency_overrides.clear()
