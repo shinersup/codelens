@@ -16,6 +16,7 @@ Two things happen here beyond simple get/set:
 import hashlib
 import json
 import logging
+import re
 from typing import Any
 
 import redis.asyncio as redis
@@ -35,14 +36,35 @@ redis_client = redis.from_url(
 )
 
 
+def _normalize_code(code: str) -> str:
+    """
+    Normalize code before hashing so that cosmetic changes (comments,
+    whitespace) don't produce cache misses.
+
+    Steps:
+      1. Strip multi-line comments  /* ... */
+      2. Strip single-line comments  # ...  and  // ...
+      3. Collapse all whitespace to a single space and strip edges
+    """
+    # 1. Remove /* ... */ (non-greedy, dotall)
+    code = re.sub(r"/\*.*?\*/", " ", code, flags=re.DOTALL)
+    # 2. Remove # and // to end of line
+    code = re.sub(r"(#|//).*", "", code)
+    # 3. Collapse whitespace
+    code = re.sub(r"\s+", " ", code).strip()
+    return code
+
+
 def make_cache_key(prefix: str, code: str, language: str) -> str:
     """
     Create a deterministic cache key from code content.
 
-    Same code + language always produces the same key.
+    Code is normalized (comments stripped, whitespace collapsed) before
+    hashing so that reformatting or adding comments doesn't bust the cache.
     Use SHA-256 so the key is fixed-length regardless of code size.
     """
-    content = f"{language}:{code}"
+    normalized = _normalize_code(code)
+    content = f"{language}:{normalized}"
     hash_digest = hashlib.sha256(content.encode()).hexdigest()[:16]
     return f"{prefix}:{hash_digest}"
 

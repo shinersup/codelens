@@ -233,6 +233,35 @@ class TestCaching:
         key3 = make_cache_key("refactor", "x = 1", "python")
         assert key1 != key2 != key3
 
+    def test_cache_key_same_for_different_comments(self):
+        """Adding or changing comments should not change the cache key."""
+        from app.services.cache import make_cache_key
+        base = "x = 1\ny = x + 2"
+        with_py_comment = "x = 1  # set x\ny = x + 2  # add"
+        with_cpp_comment = "x = 1  // set x\ny = x + 2"
+        with_block_comment = "/* init */ x = 1\ny = x + 2"
+        key_base = make_cache_key("review", base, "python")
+        assert make_cache_key("review", with_py_comment, "python") == key_base
+        assert make_cache_key("review", with_cpp_comment, "python") == key_base
+        assert make_cache_key("review", with_block_comment, "python") == key_base
+
+    def test_cache_key_same_for_different_whitespace(self):
+        """Extra newlines, tabs, or spaces should not change the cache key."""
+        from app.services.cache import make_cache_key
+        compact = "x = 1 y = x + 2"
+        spaced = "x  =  1\n\n\ny  =  x  +  2"
+        tabbed = "x\t=\t1\ty\t=\tx\t+\t2"
+        key_compact = make_cache_key("review", compact, "python")
+        assert make_cache_key("review", spaced, "python") == key_compact
+        assert make_cache_key("review", tabbed, "python") == key_compact
+
+    def test_cache_key_different_for_different_logic(self):
+        """Actual logic changes must still produce a different cache key."""
+        from app.services.cache import make_cache_key
+        key1 = make_cache_key("review", "x = 1", "python")
+        key2 = make_cache_key("review", "x = 2", "python")
+        assert key1 != key2
+
     @pytest.mark.asyncio
     async def test_cache_hit_skips_llm_call(self):
         """When cache has a result, the LLM should NOT be called."""
