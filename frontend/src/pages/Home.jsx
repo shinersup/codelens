@@ -35,10 +35,10 @@ const FEATURES = [
 const LANGUAGES = ['Python', 'JavaScript', 'TypeScript', 'Java', 'Go', 'C++', 'Rust', 'C', 'C#'];
 
 const STATS = [
-  { value: '9', label: 'Languages' },
-  { value: '3', label: 'AI Modes' },
-  { value: '<5s', label: 'Avg Response' },
-  { value: '40%', label: 'Cost Saved via Cache' },
+  { value: '9', label: 'Languages Supported' },
+  { value: '83x', label: 'Faster on Cache Hit' },
+  { value: '33%', label: 'Cache Hit Rate' },
+  { value: '79', label: 'Automated Tests' },
 ];
 
 export default function Home() {
