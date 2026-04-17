@@ -51,7 +51,7 @@ async def review_code_async(
     """
     from app.tasks.review import task_review_code
 
-    await check_rate_limit(user.id, "review", max_requests=40)
+    await check_rate_limit(user.id, "review", max_requests=10000)
     task = task_review_code.delay(request.code, request.language, user.id)
     return {"task_id": task.id}
 
@@ -64,7 +64,7 @@ async def explain_code_async(
     """Submit a code explanation as a background task."""
     from app.tasks.review import task_explain_code
 
-    await check_rate_limit(user.id, "explain", max_requests=40)
+    await check_rate_limit(user.id, "explain", max_requests=10000)
     task = task_explain_code.delay(request.code, request.language, user.id)
     return {"task_id": task.id}
 
@@ -77,7 +77,7 @@ async def suggest_refactor_async(
     """Submit a refactor analysis as a background task."""
     from app.tasks.review import task_suggest_refactor
 
-    await check_rate_limit(user.id, "refactor", max_requests=20)
+    await check_rate_limit(user.id, "refactor", max_requests=10000)
     task = task_suggest_refactor.delay(request.code, request.language, user.id)
     return {"task_id": task.id}
 
