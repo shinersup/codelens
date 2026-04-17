@@ -42,7 +42,7 @@ async def review_code(
     AI-powered code review.
     """
     # Rate limit check
-    await check_rate_limit(user.id, "review", max_requests=10000)
+    await check_rate_limit(user.id, "review", max_requests=40)
 
     # Call LLM
     result, was_cached = await llm_service.review_code(request.code, request.language)
@@ -78,7 +78,7 @@ async def explain_code(
     db: AsyncSession = Depends(get_db),
 ):
     """AI-powered code explanation."""
-    await check_rate_limit(user.id, "explain", max_requests=10000)
+    await check_rate_limit(user.id, "explain", max_requests=40)
 
     explanation, was_cached = await llm_service.explain_code(
         request.code, request.language
@@ -110,7 +110,7 @@ async def suggest_refactor(
     db: AsyncSession = Depends(get_db),
 ):
     """AI-powered refactoring suggestions."""
-    await check_rate_limit(user.id, "refactor", max_requests=10000)
+    await check_rate_limit(user.id, "refactor", max_requests=20)
 
     suggestions, was_cached = await llm_service.suggest_refactor(
         request.code, request.language
