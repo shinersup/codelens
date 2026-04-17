@@ -14,6 +14,6 @@ aws ssm get-parameters-by-path \
 
 echo "Starting containers..."
 cd /home/ubuntu/codelens
-docker compose pull
-docker compose up -d --remove-orphans
+docker-compose pull
+docker-compose up -d --remove-orphans
 echo "Done."
