@@ -14,13 +14,13 @@ Usage:
     from app.worker import celery_app
 """
 
-from urllib.parse import urlparse, urlunparse
 from celery import Celery
+
 from app.config import settings
 
-# Inject DB index into the URL path, preserving query params (for TLS options)
-_parsed = urlparse(settings.redis_url)
-_celery_url = urlunparse(_parsed._replace(path="/1"))
+# Strip any trailing slash then append the Redis DB index
+_base_url = settings.redis_url.rstrip("/")
+_celery_url = f"{_base_url}/1"   # DB 1 — separate from app cache on DB 0
 
 celery_app = Celery(
     "codelens",
@@ -28,6 +28,7 @@ celery_app = Celery(
     backend=_celery_url,
     include=["app.tasks.review"],
 )
+
 celery_app.conf.update(
     task_serializer="json",
     result_serializer="json",
