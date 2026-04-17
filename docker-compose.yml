@@ -9,7 +9,7 @@ services:
 
   worker:
     build: ./backend
-    command: celery -A app.worker worker --loglevel=info --concurrency=4
+    command: celery -A app.worker worker --loglevel=info --concurrency=2
     env_file:
       - .env
     restart: unless-stopped
