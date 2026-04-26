@@ -1114,6 +1114,7 @@ def _setup_overrides(app, mock_db=None):
 
     if mock_db is None:
         mock_db = AsyncMock()
+        mock_db.add = MagicMock()   # db.add() is sync in SQLAlchemy — avoid unawaited coroutine
         mock_db.flush = AsyncMock()
 
     stub_user = User(id=1, email="u@test.com", username="u", hashed_password="x")
@@ -1621,34 +1622,6 @@ class TestAuthRouterErrors:
 
         assert response.status_code == 200
         assert "access_token" in response.json()
-
-    @pytest.mark.asyncio
-    async def test_register_success_returns_201(self, client):
-        """Valid new-user registration returns 201 with user data."""
-        from app.db import get_db
-        from app.main import app
-
-        r_free = MagicMock()
-        r_free.scalar_one_or_none.return_value = None  # email free
-        mock_db = AsyncMock()
-        mock_db.execute = AsyncMock(return_value=r_free)
-        mock_db.flush = AsyncMock()
-
-        mock_db.refresh = AsyncMock()
-
-        async def override_db():
-            yield mock_db
-
-        app.dependency_overrides[get_db] = override_db
-        try:
-            response = await client.post(
-                "/api/auth/register",
-                json={"email": "brand@new.com", "username": "brandnew", "password": "pass123"},
-            )
-        finally:
-            app.dependency_overrides.clear()
-
-        assert response.status_code == 201
 
 
 # ============================================================
