@@ -1,5 +1,5 @@
 """
-CodeLens Test Suite — 76 tests
+CodeLens Test Suite — 102 tests
 """
 
 import pytest
@@ -194,10 +194,6 @@ class TestLanguageSupport:
             req = ReviewRequest(code="x = 1", language=lang)
             assert req.language == lang
 
-    def test_supported_language_count(self):
-        """Should support at least 6 languages (resume claim)."""
-        supported = ["python", "javascript", "typescript", "java", "go", "cpp", "rust", "c", "csharp"]
-        assert len(supported) >= 6
 
 
 # ============================================================
@@ -1089,3 +1085,612 @@ class TestAsyncTasks:
             assert "OpenAI timeout" in data["result"]["error"]
         finally:
             app.dependency_overrides.clear()
+
+
+# ============================================================
+# 14. REVIEW ROUTER — happy paths + error branches  (12 tests)
+# ============================================================
+
+def _review_row(review_id=1, score=8):
+    """Minimal mock ORM Review row with all fields the router reads."""
+    from datetime import datetime
+    r = MagicMock()
+    r.id = review_id
+    r.user_id = 1
+    r.language = "python"
+    r.review_type = "review"
+    r.score = score
+    r.code = "x = 1"
+    r.result = {"summary": "ok", "issues": [], "score": score}
+    r.created_at = datetime(2024, 1, 1)
+    return r
+
+
+def _setup_overrides(app, mock_db=None):
+    """Inject a stub user + DB into dependency_overrides; returns the mock_db."""
+    from app.db import get_db
+    from app.models.user import User
+    from app.services.auth import get_current_user
+
+    if mock_db is None:
+        mock_db = AsyncMock()
+        mock_db.flush = AsyncMock()
+
+    stub_user = User(id=1, email="u@test.com", username="u", hashed_password="x")
+
+    async def override_user():
+        return stub_user
+
+    async def override_db():
+        yield mock_db
+
+    app.dependency_overrides[get_current_user] = override_user
+    app.dependency_overrides[get_db] = override_db
+    return mock_db
+
+
+
+def _mock_result():
+    from app.schemas.review import ReviewResult
+    return ReviewResult(summary="Looks good.", issues=[], score=9)
+
+
+class TestReviewRouter:
+
+    @pytest.mark.asyncio
+    async def test_review_cache_miss_saves_history(self, client):
+        """Cache miss: LLM called, result row written to DB, review_id returned."""
+        from app.main import app
+        result = _mock_result()
+        mock_db = _setup_overrides(app)
+        try:
+            with patch("app.routers.review.check_rate_limit", new_callable=AsyncMock), \
+                 patch("app.routers.review.llm_service.review_code",
+                       new_callable=AsyncMock, return_value=(result, False)):
+                response = await client.post(
+                    "/api/review", json={"code": "x = 1", "language": "python"},
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["cached"] is False
+        assert data["review"]["score"] == 9
+        mock_db.add.assert_called_once()
+        mock_db.flush.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_review_cache_hit_skips_db(self, client):
+        """Cache hit: DB row NOT written, review_id is None in response."""
+        from app.main import app
+        result = _mock_result()
+        mock_db = _setup_overrides(app)
+        try:
+            with patch("app.routers.review.check_rate_limit", new_callable=AsyncMock), \
+                 patch("app.routers.review.llm_service.review_code",
+                       new_callable=AsyncMock, return_value=(result, True)):
+                response = await client.post(
+                    "/api/review", json={"code": "x = 1", "language": "python"},
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["cached"] is True
+        assert data["review_id"] is None
+        mock_db.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_explain_returns_explanation(self, client):
+        """POST /api/explain happy path returns explanation string."""
+        from app.main import app
+        _setup_overrides(app)
+        try:
+            with patch("app.routers.review.check_rate_limit", new_callable=AsyncMock), \
+                 patch("app.routers.review.llm_service.explain_code",
+                       new_callable=AsyncMock,
+                       return_value=("This code adds two numbers.", False)):
+                response = await client.post(
+                    "/api/explain",
+                    json={"code": "def add(a, b): return a + b", "language": "python"},
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        assert response.json()["explanation"] == "This code adds two numbers."
+
+    @pytest.mark.asyncio
+    async def test_refactor_returns_suggestions(self, client):
+        """POST /api/refactor happy path returns suggestions string."""
+        from app.main import app
+        _setup_overrides(app)
+        try:
+            with patch("app.routers.review.check_rate_limit", new_callable=AsyncMock), \
+                 patch("app.routers.review.llm_service.suggest_refactor",
+                       new_callable=AsyncMock, return_value=("### Extract helper", False)):
+                response = await client.post(
+                    "/api/refactor", json={"code": "x = 1\ny = 2", "language": "python"},
+                )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        assert "suggestions" in response.json()
+
+    @pytest.mark.asyncio
+    async def test_review_rejects_invalid_language_at_endpoint(self, client):
+        """Unsupported language is rejected with 422 before the LLM is called."""
+        from app.main import app
+        _setup_overrides(app)
+        try:
+            response = await client.post(
+                "/api/review", json={"code": "x = 1", "language": "cobol"},
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_get_history_returns_items(self, client):
+        """GET /api/history returns a list of past reviews with pagination metadata."""
+        from app.main import app
+        row = _review_row(review_id=5, score=7)
+        db_result = MagicMock()
+        db_result.scalars.return_value.all.return_value = [row]
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=db_result)
+        _setup_overrides(app, mock_db)
+        try:
+            response = await client.get("/api/history")
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["items"]) == 1
+        assert data["items"][0]["id"] == 5
+        assert data["items"][0]["score"] == 7
+        assert data["next_cursor"] is None
+
+    @pytest.mark.asyncio
+    async def test_get_history_sets_next_cursor_when_more_pages(self, client):
+        """Two rows returned for limit=1 triggers the has_more branch, sets next_cursor."""
+        from app.main import app
+        rows = [_review_row(review_id=10), _review_row(review_id=9)]
+        db_result = MagicMock()
+        db_result.scalars.return_value.all.return_value = rows
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=db_result)
+        _setup_overrides(app, mock_db)
+        try:
+            response = await client.get("/api/history?limit=1")
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["items"]) == 1
+        assert data["next_cursor"] == 10
+
+    @pytest.mark.asyncio
+    async def test_get_history_detail_found(self, client):
+        """GET /api/history/{id} returns full review detail when owned by user."""
+        from app.main import app
+        row = _review_row(review_id=3)
+        db_result = MagicMock()
+        db_result.scalar_one_or_none.return_value = row
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=db_result)
+        _setup_overrides(app, mock_db)
+        try:
+            response = await client.get("/api/history/3")
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == 3
+        assert data["code"] == "x = 1"
+
+    @pytest.mark.asyncio
+    async def test_get_history_detail_not_found_returns_404(self, client):
+        """GET /api/history/{id} for a missing or unowned review returns 404."""
+        from app.main import app
+        db_result = MagicMock()
+        db_result.scalar_one_or_none.return_value = None
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=db_result)
+        _setup_overrides(app, mock_db)
+        try:
+            response = await client.get("/api/history/999")
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_history_item_success(self, client):
+        """DELETE /api/history/{id} on an owned review returns 204 and calls db.delete."""
+        from app.main import app
+        row = _review_row(review_id=7)
+        db_result = MagicMock()
+        db_result.scalar_one_or_none.return_value = row
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=db_result)
+        mock_db.delete = AsyncMock()
+        _setup_overrides(app, mock_db)
+        try:
+            response = await client.delete("/api/history/7")
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 204
+        mock_db.delete.assert_awaited_once_with(row)
+
+    @pytest.mark.asyncio
+    async def test_delete_history_item_not_found_returns_404(self, client):
+        """DELETE /api/history/{id} for a non-existent review returns 404."""
+        from app.main import app
+        db_result = MagicMock()
+        db_result.scalar_one_or_none.return_value = None
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=db_result)
+        _setup_overrides(app, mock_db)
+        try:
+            response = await client.delete("/api/history/404")
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_clear_history_deletes_all_user_reviews(self, client):
+        """DELETE /api/history removes every review row for the current user."""
+        from app.main import app
+        rows = [_review_row(1), _review_row(2), _review_row(3)]
+        db_result = MagicMock()
+        db_result.scalars.return_value.all.return_value = rows
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=db_result)
+        mock_db.delete = AsyncMock()
+        _setup_overrides(app, mock_db)
+        try:
+            response = await client.delete("/api/history")
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 204
+        assert mock_db.delete.await_count == 3
+
+
+# ============================================================
+# 15. CELERY TASKS — cache hit and cache miss for all 3 tasks (6 tests)
+# ============================================================
+
+class TestCeleryTaskBodies:
+    """
+    Call each Celery task via .apply() (runs synchronously, no broker needed).
+    Cache hit  → DB session never opened.
+    Cache miss → DB session opened, add/commit called.
+    These are sync def tests to avoid nested-event-loop issues with _run_sync().
+    """
+
+    def test_task_review_cache_hit_skips_db(self):
+        """task_review_code cache hit: result returned without touching the database."""
+        from app.schemas.review import ReviewResult
+        from app.tasks.review import task_review_code
+
+        result = ReviewResult(summary="ok", issues=[], score=9)
+        with patch("app.services.llm.llm_service.review_code",
+                   new=AsyncMock(return_value=(result, True))):
+            out = task_review_code.apply(args=["x = 1", "python", 1]).get()
+
+        assert out["cached"] is True
+        assert out["review_id"] is None
+        assert out["review"]["score"] == 9
+
+    def test_task_review_cache_miss_saves_to_db(self):
+        """task_review_code cache miss: DB session opened, add and commit called."""
+        from app.schemas.review import ReviewResult
+        from app.tasks.review import task_review_code
+
+        result = ReviewResult(summary="ok", issues=[], score=9)
+        mock_session = AsyncMock()
+        mock_engine = AsyncMock()
+
+        with patch("app.services.llm.llm_service.review_code",
+                   new=AsyncMock(return_value=(result, False))), \
+             patch("app.tasks.review._make_session",
+                   return_value=(mock_engine, mock_session)):
+            out = task_review_code.apply(args=["x = 1", "python", 1]).get()
+
+        assert out["cached"] is False
+        mock_session.add.assert_called_once()
+        mock_session.commit.assert_awaited_once()
+        mock_engine.dispose.assert_awaited_once()
+
+    def test_task_explain_cache_hit(self):
+        """task_explain_code cache hit: explanation returned, no DB write."""
+        from app.tasks.review import task_explain_code
+
+        with patch("app.services.llm.llm_service.explain_code",
+                   new=AsyncMock(return_value=("Great code.", True))):
+            out = task_explain_code.apply(args=["x = 1", "python", 1]).get()
+
+        assert out["explanation"] == "Great code."
+        assert out["cached"] is True
+
+    def test_task_explain_cache_miss_saves_to_db(self):
+        """task_explain_code cache miss: explanation persisted to DB."""
+        from app.tasks.review import task_explain_code
+
+        mock_session = AsyncMock()
+        mock_engine = AsyncMock()
+
+        with patch("app.services.llm.llm_service.explain_code",
+                   new=AsyncMock(return_value=("Detailed explanation.", False))), \
+             patch("app.tasks.review._make_session",
+                   return_value=(mock_engine, mock_session)):
+            out = task_explain_code.apply(args=["x = 1", "python", 1]).get()
+
+        assert out["cached"] is False
+        mock_session.add.assert_called_once()
+        mock_engine.dispose.assert_awaited_once()
+
+    def test_task_refactor_cache_hit(self):
+        """task_suggest_refactor cache hit: suggestions returned without DB write."""
+        from app.tasks.review import task_suggest_refactor
+
+        with patch("app.services.llm.llm_service.suggest_refactor",
+                   new=AsyncMock(return_value=("### Use f-strings", True))):
+            out = task_suggest_refactor.apply(args=["x = 1", "python", 1]).get()
+
+        assert out["suggestions"] == "### Use f-strings"
+        assert out["cached"] is True
+
+    def test_task_refactor_cache_miss_saves_to_db(self):
+        """task_suggest_refactor cache miss: suggestions persisted to DB."""
+        from app.tasks.review import task_suggest_refactor
+
+        mock_session = AsyncMock()
+        mock_engine = AsyncMock()
+
+        with patch("app.services.llm.llm_service.suggest_refactor",
+                   new=AsyncMock(return_value=("### Extract helper", False))), \
+             patch("app.tasks.review._make_session",
+                   return_value=(mock_engine, mock_session)):
+            out = task_suggest_refactor.apply(args=["x = 1", "python", 1]).get()
+
+        assert out["cached"] is False
+        mock_session.add.assert_called_once()
+        mock_engine.dispose.assert_awaited_once()
+
+
+# ============================================================
+# 16. AUTH ROUTER — register/login error branches  (6 tests)
+# ============================================================
+
+class TestAuthRouterErrors:
+
+    @pytest.mark.asyncio
+    async def test_register_duplicate_email_returns_400(self, client):
+        """Registering with an already-used email returns 400."""
+        from app.db import get_db
+        from app.main import app
+        from app.models.user import User
+
+        existing = User(id=1, email="taken@example.com", username="taken", hashed_password="x")
+        r1 = MagicMock()
+        r1.scalar_one_or_none.return_value = existing
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=r1)
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        try:
+            response = await client.post(
+                "/api/auth/register",
+                json={"email": "taken@example.com", "username": "newuser", "password": "pass123"},
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 400
+        assert "Email" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_register_duplicate_username_returns_400(self, client):
+        """Registering with an already-taken username returns 400."""
+        from app.db import get_db
+        from app.main import app
+        from app.models.user import User
+
+        r_free = MagicMock()
+        r_free.scalar_one_or_none.return_value = None
+        taken = User(id=2, email="other@example.com", username="taken", hashed_password="x")
+        r_taken = MagicMock()
+        r_taken.scalar_one_or_none.return_value = taken
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(side_effect=[r_free, r_taken])
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        try:
+            response = await client.post(
+                "/api/auth/register",
+                json={"email": "new@example.com", "username": "taken", "password": "pass123"},
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 400
+        assert "Username" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_login_wrong_password_returns_401(self, client):
+        """Correct email but wrong password fails authentication with 401."""
+        from app.db import get_db
+        from app.main import app
+        from app.models.user import User
+        from app.services.auth import hash_password
+
+        real_user = User(
+            id=1, email="u@test.com", username="u",
+            hashed_password=hash_password("correct-password"),
+        )
+        r1 = MagicMock()
+        r1.scalar_one_or_none.return_value = real_user
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=r1)
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        try:
+            response = await client.post(
+                "/api/auth/login",
+                json={"email": "u@test.com", "password": "wrong-password"},
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_login_unknown_email_returns_401(self, client):
+        """Non-existent email returns 401 (user not found branch)."""
+        from app.db import get_db
+        from app.main import app
+
+        r1 = MagicMock()
+        r1.scalar_one_or_none.return_value = None
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=r1)
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        try:
+            response = await client.post(
+                "/api/auth/login",
+                json={"email": "ghost@example.com", "password": "anything"},
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_login_success_returns_access_token(self, client):
+        """Correct credentials return a JWT access_token."""
+        from app.db import get_db
+        from app.main import app
+        from app.models.user import User
+        from app.services.auth import hash_password
+
+        real_user = User(
+            id=1, email="u@test.com", username="u",
+            hashed_password=hash_password("secret"),
+        )
+        r1 = MagicMock()
+        r1.scalar_one_or_none.return_value = real_user
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=r1)
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        try:
+            response = await client.post(
+                "/api/auth/login",
+                json={"email": "u@test.com", "password": "secret"},
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        assert "access_token" in response.json()
+
+    @pytest.mark.asyncio
+    async def test_register_success_returns_201(self, client):
+        """Valid new-user registration returns 201 with user data."""
+        from app.db import get_db
+        from app.main import app
+
+        r_free = MagicMock()
+        r_free.scalar_one_or_none.return_value = None  # email free
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=r_free)
+        mock_db.flush = AsyncMock()
+
+        mock_db.refresh = AsyncMock()
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        try:
+            response = await client.post(
+                "/api/auth/register",
+                json={"email": "brand@new.com", "username": "brandnew", "password": "pass123"},
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 201
+
+
+# ============================================================
+# 17. AUTH SERVICE — get_current_user edge cases  (2 tests)
+# ============================================================
+
+class TestGetCurrentUserEdgeCases:
+
+    @pytest.mark.asyncio
+    async def test_garbage_bearer_token_returns_401(self, client):
+        """A malformed JWT triggers the JWTError branch and returns 401."""
+        response = await client.post(
+            "/api/review",
+            json={"code": "x = 1", "language": "python"},
+            headers={"Authorization": "Bearer this.is.garbage"},
+        )
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_valid_token_for_deleted_user_returns_401(self, client):
+        """A valid JWT whose user no longer exists in the DB returns 401."""
+        from app.db import get_db
+        from app.main import app
+        from app.services.auth import create_access_token
+
+        token = create_access_token(user_id=9999)
+        r1 = MagicMock()
+        r1.scalar_one_or_none.return_value = None
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=r1)
+
+        async def override_db():
+            yield mock_db
+
+        app.dependency_overrides[get_db] = override_db
+        try:
+            response = await client.post(
+                "/api/review",
+                json={"code": "x = 1", "language": "python"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 401
