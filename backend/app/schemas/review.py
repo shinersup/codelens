@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 class ReviewRequest(BaseModel):
     """What the user sends to get a code review."""
-    code: str = Field(..., min_length=1, max_length=10000)
+    code: str = Field(..., min_length=1, max_length=30000)
     language: str = Field(..., pattern="^(python|javascript|typescript|java|go|cpp|rust|c|csharp)$")
 
 
