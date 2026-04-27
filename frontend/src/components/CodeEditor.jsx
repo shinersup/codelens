@@ -56,7 +56,7 @@ export default function CodeEditor({ onSubmit, loading, actionLabel = 'Analyze' 
 
         <div className="flex items-center gap-4">
           <span className="font-mono text-[10px] text-txt-muted tracking-wide">
-            {lineCount} lines · {charCount.toLocaleString()} / 10,000
+            {lineCount} lines · {charCount.toLocaleString()} / 30,000
           </span>
         </div>
       </div>
@@ -66,7 +66,7 @@ export default function CodeEditor({ onSubmit, loading, actionLabel = 'Analyze' 
         <textarea
           value={code}
           onChange={(e) => {
-            if (e.target.value.length <= 10000) {
+            if (e.target.value.length <= 30000) {
               setCode(e.target.value);
             }
           }}
@@ -80,9 +80,9 @@ export default function CodeEditor({ onSubmit, loading, actionLabel = 'Analyze' 
         />
 
         {/* Char limit warning */}
-        {charCount > 9000 && (
+        {charCount > 29000 && (
           <div className="absolute bottom-2 right-3 font-mono text-[10px] text-accent-amber animate-pulse">
-            {(10000 - charCount).toLocaleString()} chars remaining
+            {(30000 - charCount).toLocaleString()} chars remaining
           </div>
         )}
       </div>
