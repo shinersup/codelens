@@ -148,10 +148,10 @@ class TestSchemaValidation:
             ReviewRequest(code="x = 1", language="cobol")
 
     def test_review_request_rejects_oversized_code(self):
-        """Code over 10000 chars should be rejected."""
+        """Code over 30000 chars should be rejected."""
         from app.schemas.review import ReviewRequest
         with pytest.raises(Exception):
-            ReviewRequest(code="x" * 10001, language="python")
+            ReviewRequest(code="x" * 30001, language="python")
 
     def test_review_result_accepts_valid_data(self):
         from app.schemas.review import ReviewResult
